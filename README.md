@@ -22,6 +22,7 @@ uv run ateam import             # upload existing Sessions under the Workspace R
 uv run ateam sessions [--here]  # Handles look like project/worktree/6hex
 uv run ateam handoff ateam/feat-init/9e3cee   # pull here, rewrite paths, `claude --resume`
 uv run ateam handoffs           # who moved what, when
+uv run ateam gc [--apply]       # delete old Session files on HomeBase, keeping Tombstones (also runs daily)
 ```
 
 Layout: `packages/homebase` (FastAPI + SQLite server), `packages/ateam` (CLI and Claude Code adapter). Tests: `uv run pytest`.

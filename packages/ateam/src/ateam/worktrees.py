@@ -74,15 +74,23 @@ def repo_dir(project_dir: Path) -> Path | None:
     return None
 
 
-def find_worktree(project_dir: Path, branch: str) -> Path | None:
+def _listing(project_dir: Path) -> dict[str, Path]:
+    """Branch -> directory for each live Worktree; ones whose directory was deleted (prunable) are skipped."""
     repo = repo_dir(project_dir)
-    if repo is None:
-        return None
-    listing = git(repo, "worktree", "list", "--porcelain") or ""
-    path = None
-    for line in listing.splitlines():
-        if line.startswith("worktree "):
-            path = Path(line.removeprefix("worktree "))
-        elif line == f"branch refs/heads/{branch}" and path is not None:
-            return path
-    return None
+    listing = git(repo, "worktree", "list", "--porcelain") if repo else None
+    found = {}
+    for block in (listing or "").split("\n\n"):
+        fields = dict(line.partition(" ")[::2] for line in block.splitlines())
+        branch = fields.get("branch", "").removeprefix("refs/heads/")
+        if branch and "worktree" in fields and "prunable" not in fields and Path(fields["worktree"]).is_dir():
+            found[branch] = Path(fields["worktree"])
+    return found
+
+
+def find_worktree(project_dir: Path, branch: str) -> Path | None:
+    return _listing(project_dir).get(branch)
+
+
+def branches(project_dir: Path) -> list[str]:
+    """Branches that have a Worktree in this Project on this Machine."""
+    return sorted(_listing(project_dir))

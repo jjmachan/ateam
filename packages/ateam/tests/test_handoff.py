@@ -146,3 +146,15 @@ def test_sessions_outside_a_project_are_skipped(machines, monkeypatch):
     mac.activate(monkeypatch)
     write_transcript(mac, Path("/tmp"), [line("/tmp", "hi", "2026-10-11T10:00:00Z")])
     assert sessions.upload(mac.hb, mac.cfg, claude_code.read_session(claude_code.find_transcript(SID))).status == "skipped"
+
+
+def test_inventory_skips_deleted_worktrees(machines, monkeypatch):
+    import shutil
+
+    mac, _ = machines
+    mac.activate(monkeypatch)
+    assert worktrees.branches(mac.root / "personal/proj") == ["feat/x", "main"]
+    shutil.rmtree(mac.worktree)  # deleted by hand, not via `git worktree remove`
+    assert worktrees.branches(mac.root / "personal/proj") == ["main"]
+    mac.hb.post("/sessions", {"id": SID, "harness": "claude-code", "project_path": "personal/proj", "branch": "x"})
+    assert sessions.report_inventory(mac.hb, mac.cfg) == 1

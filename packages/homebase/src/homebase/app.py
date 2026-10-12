@@ -14,7 +14,7 @@ from typing import Literal
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
-from homebase import handles
+from homebase import gc, handles
 from homebase.db import DB, now
 from homebase.identity import Caller, HeaderIdentity, Identity, TailscaleIdentity
 
@@ -46,6 +46,15 @@ class HandoffBody(BaseModel):
     initiator_session: str | None = None
 
 
+class WorktreeRef(BaseModel):
+    project_path: str
+    branch: str
+
+
+class InventoryBody(BaseModel):
+    worktrees: list[WorktreeRef]
+
+
 class EventBody(BaseModel):
     kind: Literal["open", "activity", "close"]
 
@@ -69,6 +78,7 @@ def create_app(data_dir: Path, identity: Identity | None = None) -> FastAPI:
     identity = identity or TailscaleIdentity()
     app = FastAPI(title="HomeBase")
     app.state.db = db
+    app.state.files_dir = files_dir
 
     def caller(request: Request) -> Caller:
         return identity(request)
@@ -123,6 +133,31 @@ def create_app(data_dir: Path, identity: Identity | None = None) -> FastAPI:
     def whoami(machine: dict = Depends(me)):
         return machine
 
+    @app.get("/projects")
+    def projects():
+        return db.query("SELECT * FROM projects ORDER BY path")
+
+    @app.put("/me/inventory")
+    def put_inventory(body: InventoryBody, machine: dict = Depends(me)):
+        """Replace the Worktrees this Machine has, across every Project HomeBase knows."""
+        with db.lock, db.conn:
+            db.conn.execute("DELETE FROM machine_worktrees WHERE machine = ?", (machine["name"],))
+            db.conn.executemany(
+                "INSERT OR IGNORE INTO machine_worktrees (machine, project_path, branch) VALUES (?, ?, ?)",
+                [(machine["name"], w.project_path, w.branch) for w in body.worktrees],
+            )
+            db.conn.execute("UPDATE machines SET inventory_at = ? WHERE name = ?", (now(), machine["name"]))
+        return {"machine": machine["name"], "worktrees": len(body.worktrees)}
+
+    @app.post("/gc")
+    def collect(
+        dry_run: bool = True,
+        inactive_days: int = gc.INACTIVE_DAYS,
+        gone_days: int = gc.GONE_DAYS,
+        machine: dict = Depends(me),
+    ):
+        return gc.run(db, files_dir, is_stale, dry_run, inactive_days, gone_days)
+
     # Sessions
 
     @app.post("/sessions")
@@ -136,6 +171,9 @@ def create_app(data_dir: Path, identity: Identity | None = None) -> FastAPI:
                    last_activity_at = MAX(last_activity_at, COALESCE(?, last_activity_at)) WHERE id = ?""",
                 body.harness_version, body.title, body.branch, body.subdir, body.last_activity_at, body.id,
             )
+            if existing["tombstoned_at"] and (body.last_activity_at or "") > existing["tombstoned_at"]:
+                # New activity after collection: the Holder still has the Session and re-uploads it.
+                db.execute("UPDATE sessions SET tombstoned_at = NULL WHERE id = ?", body.id)
             return session_or_404(body.id)
         db.execute(
             "INSERT INTO projects (path, remote) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET remote = COALESCE(excluded.remote, remote)",

@@ -65,6 +65,7 @@ def machine_register(
         fail(str(e))
     cfg.machine, cfg.workspace_root = name, str(root)
     config.save(cfg)
+    sessions.report_inventory(HomeBase(cfg), cfg)
     typer.echo(f"registered {name} (root {root}) with {cfg.homebase_url}")
 
 
@@ -77,6 +78,14 @@ def machine_list(as_json: JsonOpt = False):
         return
     for m in rows:
         typer.echo(f"{m['name']:<16} {m['workspace_root']}")
+
+
+@machine_app.command("report")
+def machine_report(as_json: JsonOpt = False):
+    """Send HomeBase this Machine's Inventory: which Worktrees it has (the hooks do this hourly)."""
+    cfg, hb = client()
+    count = sessions.report_inventory(hb, cfg)
+    typer.echo(json.dumps({"worktrees": count}) if as_json else f"reported {count} worktree(s)")
 
 
 # Sessions
@@ -262,6 +271,34 @@ def handoffs(
         who = h["initiator_kind"] + (f" ({h['initiator_session'][:8]})" if h["initiator_session"] else "")
         forced = " forced" if h["forced"] else ""
         typer.echo(f"{h['at'][:16]}  {h['session_id'][:8]}  {h['from_machine']} -> {h['to_machine']}{forced}  by {who}")
+
+
+@app.command("gc")
+def gc_cmd(
+    apply: Annotated[bool, typer.Option("--apply", help="Delete files; without this only shows what would go.")] = False,
+    inactive_days: Annotated[int, typer.Option(help="Collect after this many idle days.")] = 60,
+    gone_days: Annotated[int, typer.Option(help="...or this many if the Worktree is gone everywhere.")] = 14,
+    show_all: Annotated[bool, typer.Option("--all", help="Also list Sessions that are kept.")] = False,
+    as_json: JsonOpt = False,
+):
+    """Garbage-collect old Session files on HomeBase, keeping Tombstones."""
+    cfg, hb = client()
+    try:
+        sessions.report_inventory(hb, cfg)
+    except HomeBaseError as e:
+        typer.secho(f"warning: could not report inventory: {e}", fg="yellow", err=True)
+    verdicts = hb.request(
+        "POST", "/gc", params={"dry_run": not apply, "inactive_days": inactive_days, "gone_days": gone_days}
+    ).json()
+    if as_json:
+        typer.echo(json.dumps(verdicts, indent=2))
+        return
+    shown = verdicts if show_all else [v for v in verdicts if v["collect"]]
+    for v in shown:
+        typer.echo(f"{'collect' if v['collect'] else 'keep':<8} {v['handle']}  {v['reason']}")
+    collected = sum(v["collect"] for v in verdicts)
+    verb = "collected" if apply else "would collect"
+    typer.echo(f"{verb} {collected} of {len(verdicts)} session(s)" + ("" if apply else "; pass --apply to delete"))
 
 
 # Harness integration

@@ -64,6 +64,10 @@ _Avoid_: clone, branch, copy
 
 ### Retention
 
+**Inventory**:
+The set of Worktrees a Machine reports having, for the Projects HomeBase knows; a Machine with no Inventory is assumed to have every Worktree.
+_Avoid_: manifest, scan, state
+
 **Tombstone**:
 The record that a Session existed, kept on HomeBase after its transcript has been garbage-collected.
 _Avoid_: archive, stub

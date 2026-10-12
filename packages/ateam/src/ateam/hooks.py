@@ -10,11 +10,13 @@ import fcntl
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from ateam import claude_code, config, sessions
 from ateam.client import HomeBase, HomeBaseError
 
+INVENTORY_EVERY = 3600  # seconds
 EVENTS = {"session-start": "open", "stop": "activity", "session-end": "close"}
 
 
@@ -69,6 +71,18 @@ def work(event: str, session_id: str, transcript: str) -> None:
         queued.unlink()
         _sync(hb, cfg, queued_event, queued.name, queued_transcript)
     _sync(hb, cfg, event, session_id, transcript)
+    _maybe_report_inventory(hb, cfg)
+
+
+def _maybe_report_inventory(hb: HomeBase, cfg: config.Config) -> None:
+    stamp = _dir("") / "inventory.stamp"
+    if stamp.exists() and time.time() - stamp.stat().st_mtime < INVENTORY_EVERY:
+        return
+    try:
+        sessions.report_inventory(hb, cfg)
+        stamp.touch()
+    except HomeBaseError as e:
+        print(f"inventory: {e}", file=sys.stderr)
 
 
 def _sync(hb: HomeBase, cfg: config.Config, event: str, session_id: str, transcript: str) -> None:

@@ -12,7 +12,14 @@ CREATE TABLE IF NOT EXISTS machines (
     node_id TEXT UNIQUE NOT NULL,
     workspace_root TEXT NOT NULL,
     harness_versions TEXT NOT NULL DEFAULT '{}',
-    registered_at TEXT NOT NULL
+    registered_at TEXT NOT NULL,
+    inventory_at TEXT
+);
+CREATE TABLE IF NOT EXISTS machine_worktrees (
+    machine TEXT NOT NULL REFERENCES machines(name),
+    project_path TEXT NOT NULL,
+    branch TEXT NOT NULL,
+    PRIMARY KEY (machine, project_path, branch)
 );
 CREATE TABLE IF NOT EXISTS projects (
     path TEXT PRIMARY KEY,
@@ -64,6 +71,9 @@ class DB:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
+        columns = {r[1] for r in self.conn.execute("PRAGMA table_info(machines)")}
+        if "inventory_at" not in columns:  # databases created before Inventories existed
+            self.conn.execute("ALTER TABLE machines ADD COLUMN inventory_at TEXT")
         self.lock = threading.RLock()
 
     def query(self, sql: str, *args) -> list[dict]:

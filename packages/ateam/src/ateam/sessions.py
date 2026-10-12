@@ -141,3 +141,14 @@ def _replacements(files, source_root: str, subdir: str, worktree: Path, root: Pa
                 break
     pairs.append((source_root.rstrip("/"), str(root).rstrip("/")))
     return pairs
+
+
+def report_inventory(hb: HomeBase, cfg: Config) -> int:
+    """Tell HomeBase which Worktrees this Machine has, for every Project HomeBase knows about."""
+    refs = [
+        {"project_path": p["path"], "branch": branch}
+        for p in hb.get("/projects")
+        for branch in worktrees.branches(cfg.root / p["path"])
+    ]
+    hb.request("PUT", "/me/inventory", json={"worktrees": refs})
+    return len(refs)
